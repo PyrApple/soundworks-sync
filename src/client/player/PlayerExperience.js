@@ -1,5 +1,4 @@
 import * as soundworks from 'soundworks/client';
-import PlayerRenderer from './PlayerRenderer';
 
 const audioContext = soundworks.audioContext;
 
@@ -8,20 +7,22 @@ const viewTemplate = `
   <div class="foreground">
     <div class="section-top flex-middle"></div>
     <div class="section-center flex-center">
-      <p class="big"><%= title %></p>
+      <p id="title" class="huger"><%= title %></p>
     </div>
     <div class="section-bottom flex-middle"></div>
   </div>
 `;
 
-// this experience plays a sound when it starts, and plays another sound when
-// other clients join the experience
+// this experience plays a sound synchronized across every client 
+// connected to the experience
 export default class PlayerExperience extends soundworks.Experience {
   constructor(assetsDomain, audioFiles) {
     super();
 
+    // services
     this.platform = this.require('platform', { features: ['web-audio'] });
     this.checkin = this.require('checkin', { showDialog: false });
+    this.sync = this.require('sync');
     this.audioBufferManager = this.require('audio-buffer-manager', {
       assetsDomain: assetsDomain,
       files: audioFiles,
@@ -45,34 +46,30 @@ export default class PlayerExperience extends soundworks.Experience {
 
     this.show();
 
-    // play the first loaded buffer immediately
-    const src = audioContext.createBufferSource();
-    src.buffer = this.audioBufferManager.getAudioBuffer('default', 0);
-    src.connect(audioContext.destination);
-    src.start(audioContext.currentTime);
-
-    // play the second loaded buffer when the message `play` is received from
-    // the server, the message is send when another player joins the experience.
-    this.receive('play', () => {
-      const delay = Math.random();
-      const src = audioContext.createBufferSource();
-      src.buffer = this.audioBufferManager.getAudioBuffer('default', 1);
+    const updateRate = 2.0; // in seconds
+    setInterval( () => {
+      // create source node
+      let audioBuffer = this.audioBufferManager.getAudioBuffer('default', 0);
+      let src = audioContext.createBufferSource();
+      src.buffer = audioBuffer;
       src.connect(audioContext.destination);
-      src.start(audioContext.currentTime + delay);
-    });
 
-    // initialize rendering
-    this.renderer = new PlayerRenderer(100, 100);
-    this.view.addRenderer(this.renderer);
+      // get current time
+      const now = this.sync.getSyncTime();
+      // console.log( 'time:', now );
+      let timeInBuffer = now % audioBuffer.duration;
+      let soundDuration = updateRate + 0.5; // 0.5 to overlap
 
-    // this function is called before each update (`Renderer.render`) of the canvas
-    this.view.setPreRender(function(ctx, dt, canvasWidth, canvasHeight) {
-      ctx.save();
-      ctx.globalAlpha = 0.05;
-      ctx.fillStyle = '#000000';
-      ctx.rect(0, 0, canvasWidth, canvasHeight);
-      ctx.fill();
-      ctx.restore();
-    });
+      // start source in sync. across clients
+      src.start(audioContext.currentTime, timeInBuffer, soundDuration);
+      
+    }, updateRate * 1000);
+
+    const updateRate2 = 0.05; // in seconds
+    setInterval( () => {
+      const now = this.sync.getSyncTime();
+      document.getElementById('title').innerHTML = Math.round(now);
+    }, updateRate2 * 1000);
+
   }
 }
